@@ -1,0 +1,97 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  IMAGE_NAME: devops-lab-service-ci
+  CONTAINER_NAME: devops-lab-ci
+
+jobs:
+  ci:
+    name: Build and test Docker image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t $IMAGE_NAME:latest \
+            -f docker/Dockerfile \
+            .
+
+      - name: Run container
+        run: |
+          docker rm -f $CONTAINER_NAME 2>/dev/null || true
+
+          docker run -d \
+            --name $CONTAINER_NAME \
+            -p 8000:8000 \
+            $IMAGE_NAME:latest
+
+      - name: Check service health
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/; then
+              echo "Application is available"
+              exit 0
+            fi
+
+            echo "Waiting for application..."
+            sleep 1
+          done
+
+          echo "Application did not start"
+          docker logs $CONTAINER_NAME
+          exit 1
+
+      - name: Check metrics endpoint
+        run: |
+          curl -fsS http://127.0.0.1:8000/metrics | grep app_requests_total
+
+      - name: Stop test container
+        if: always()
+        run: |
+          docker rm -f $CONTAINER_NAME 2>/dev/null || true
+
+  deploy:
+    name: Deploy to VM
+    runs-on: ubuntu-latest
+    needs: ci
+
+    steps:
+      - name: Prepare SSH key
+        run: |
+          mkdir -p ~/.ssh
+
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy application
+        run: |
+          ssh \
+            -i ~/.ssh/deploy_key \
+            -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" << EOF
+          set -e
+
+          cd /home/artem/Programms/OSaN/lab4/devops-lab-service
+
+          git fetch origin
+          git reset --hard origin/${GITHUB_REF_NAME}
+
+          docker compose -f docker/docker-compose.yml up -d --build
+
+          docker ps
+          curl -fsS http://127.0.0.1:8000/
+          curl -fsS http://127.0.0.1:8000/metrics | grep app_requests_total
+          EOF
