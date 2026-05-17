@@ -78,20 +78,42 @@ jobs:
 
       - name: Deploy application
         run: |
+          set -eux
+
+          BRANCH="${{ github.ref_name }}"
+
           ssh \
             -i ~/.ssh/deploy_key \
             -p "${{ secrets.SSH_PORT }}" \
-            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" << EOF
-          set -e
+            -o BatchMode=yes \
+            -o ConnectTimeout=20 \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "BRANCH='$BRANCH' bash -s" <<'EOF'
+          set -euxo pipefail
 
           cd /home/artem/Programms/OSaN/lab4/devops-lab-service
 
-          git fetch origin
-          git reset --hard origin/${GITHUB_REF_NAME}
+          git fetch origin "$BRANCH"
+          git reset --hard "origin/$BRANCH"
 
-          docker compose -f docker/docker-compose.yml up -d --build
+          docker compose -f docker/docker-compose.yml build app
+
+          sudo -n /usr/local/sbin/force-remove-devops-lab-app
+
+          docker compose -f docker/docker-compose.yml up -d --no-deps app
 
           docker ps
+
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/; then
+              echo "Application is available"
+              break
+            fi
+
+            echo "Waiting for application..."
+            sleep 2
+          done
+
           curl -fsS http://127.0.0.1:8000/
           curl -fsS http://127.0.0.1:8000/metrics | grep app_requests_total
           EOF
