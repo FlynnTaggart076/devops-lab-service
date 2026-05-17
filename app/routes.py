@@ -10,7 +10,7 @@ task_id = 0
 
 @router.get("/")
 def root():
-    return {"message": "Service is running after CI/CD deploy, mod 2"}
+    return {"message": "Service is running after CI/CD deploy, mod 3"}
 
 
 @router.post("/tasks")
