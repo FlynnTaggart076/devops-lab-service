@@ -69,12 +69,12 @@ jobs:
     steps:
       - name: Prepare SSH key
         run: |
+          set -eux
+
           mkdir -p ~/.ssh
 
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-
-          ssh-keyscan -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Deploy application
         run: |
@@ -86,13 +86,16 @@ jobs:
             -i ~/.ssh/deploy_key \
             -p "${{ secrets.SSH_PORT }}" \
             -o BatchMode=yes \
-            -o ConnectTimeout=20 \
+            -o ConnectTimeout=30 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
             "BRANCH='$BRANCH' bash -s" <<'EOF'
           set -euxo pipefail
 
           cd /home/artem/Programms/OSaN/lab4/devops-lab-service
 
+          git remote set-url origin https://github.com/FlynnTaggart076/devops-lab-service.git
           git fetch origin "$BRANCH"
           git reset --hard "origin/$BRANCH"
 
@@ -100,7 +103,7 @@ jobs:
 
           sudo -n /usr/local/sbin/force-remove-devops-lab-app
 
-          docker compose -f docker/docker-compose.yml up -d --no-deps app
+          docker compose -f docker/docker-compose.yml up -d --no-deps --force-recreate app
 
           docker ps
 
